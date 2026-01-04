@@ -29,18 +29,22 @@ WORKDIR /output
 
 # 整理文件结构
 # MindTheGapps (Android 14) 结构通常为 system/product, system/system_ext 等
-# 我们将其内容“扁平化”复制到 /output，以适配 system-as-root 结构
+# 我们保持 system 目录结构，直接复制到 /output/system
+# 这样 COPY 到 / 时，会合并到 /system 目录，避免覆盖 /product 等软链接
 RUN cd /tmp/gapps_extracted && \
-    # 如果存在 system 目录，将其内容（如 product, system_ext）复制到 /output 根目录
+    mkdir -p /output && \
+    # 如果存在 system 目录，直接复制
     if [ -d "system" ]; then \
-        echo "Copying system contents to root..." && \
-        cp -a system/* /output/ || true; \
+        echo "Copying system directory..." && \
+        cp -a system /output/; \
     fi && \
-    # 如果存在顶层的 product 或 system_ext (非标准结构)，也复制过去
+    # 如果存在顶层的 product 或 system_ext (非标准结构)，复制到 /output/system/ 下
+    # 以防万一，虽然 MindTheGapps 通常在 system/ 下
     for dir in product system_ext; do \
         if [ -d "$dir" ]; then \
-            echo "Copying $dir..." && \
-            cp -a "$dir" /output/; \
+            echo "Copying $dir to system/$dir..." && \
+            mkdir -p /output/system && \
+            cp -a "$dir" /output/system/; \
         fi; \
     done
 
