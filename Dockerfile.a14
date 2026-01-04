@@ -1,0 +1,58 @@
+# 使用多阶段构建
+# 第一阶段：下载并解压 GApps
+FROM alpine:latest AS builder
+
+# 安装必要的工具
+RUN apk add --no-cache wget unzip
+
+# 定义构建参数 GAPPS_URL
+# 默认使用 MindTheGapps Android 14 ARM64 (20250203)
+ARG GAPPS_URL="https://github.com/MindTheGapps/14.0.0-arm64/releases/download/MindTheGapps-14.0.0-arm64-20250203_200051/MindTheGapps-14.0.0-arm64-20250203_200051.zip"
+
+WORKDIR /tmp
+
+# 下载 GApps
+# 如果没有提供 URL，打印错误并退出
+RUN if [ -z "$GAPPS_URL" ]; then \
+        echo "Error: GAPPS_URL build argument is required."; \
+        exit 1; \
+    fi && \
+    echo "Downloading GApps from $GAPPS_URL..." && \
+    wget -q -O gapps.zip "$GAPPS_URL"
+
+# 解压
+RUN echo "Unzipping GApps..." && \
+    unzip -q gapps.zip -d gapps_extracted
+
+# 准备输出目录
+WORKDIR /output
+
+# 整理文件结构
+# MindTheGapps (Android 14) 结构通常为 system/product, system/system_ext 等
+# 我们将其内容“扁平化”复制到 /output，以适配 system-as-root 结构
+RUN cd /tmp/gapps_extracted && \
+    # 如果存在 system 目录，将其内容（如 product, system_ext）复制到 /output 根目录
+    if [ -d "system" ]; then \
+        echo "Copying system contents to root..." && \
+        cp -a system/* /output/ || true; \
+    fi && \
+    # 如果存在顶层的 product 或 system_ext (非标准结构)，也复制过去
+    for dir in product system_ext; do \
+        if [ -d "$dir" ]; then \
+            echo "Copying $dir..." && \
+            cp -a "$dir" /output/; \
+        fi; \
+    done
+
+# 第二阶段：构建最终镜像
+FROM redroid/redroid:14.0.0-latest
+
+# 从 builder 阶段复制准备好的 GApps 文件到根目录
+COPY --from=builder /output /
+
+# 修复权限
+# Android 系统文件通常需要 root 所有权
+RUN chown -R 0:0 /system /product /system_ext || true
+
+# 这里的命令是为了确保文件被正确覆盖且权限正确
+# 如果有特定的 GApps 初始化脚本需要运行，可以在这里添加
