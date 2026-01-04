@@ -1,0 +1,60 @@
+# 使用多阶段构建
+# 第一阶段：下载并解压 GApps
+FROM alpine:latest AS builder
+
+# 安装必要的工具
+RUN apk add --no-cache wget unzip
+
+# 定义构建参数 GAPPS_URL
+# 默认使用 MindTheGapps Android 14 ARM64 (20250203)
+ARG GAPPS_URL="https://github.com/MindTheGapps/14.0.0-arm64/releases/download/MindTheGapps-14.0.0-arm64-20250203_200051/MindTheGapps-14.0.0-arm64-20250203_200051.zip"
+
+WORKDIR /tmp
+
+# 下载 GApps
+# 如果没有提供 URL，打印错误并退出
+RUN if [ -z "$GAPPS_URL" ]; then \
+        echo "Error: GAPPS_URL build argument is required."; \
+        exit 1; \
+    fi && \
+    echo "Downloading GApps from $GAPPS_URL..." && \
+    wget -q -O gapps.zip "$GAPPS_URL"
+
+# 解压
+RUN echo "Unzipping GApps..." && \
+    unzip -q gapps.zip -d gapps_extracted
+
+# 准备输出目录
+WORKDIR /output
+
+# 整理文件结构
+# MindTheGapps (Android 14) 结构通常为 system/product, system/system_ext 等
+# 我们保持 system 目录结构，直接复制到 /output/system
+# 这样 COPY 到 / 时，会合并到 /system 目录，避免覆盖 /product 等软链接
+RUN cd /tmp/gapps_extracted && \
+    mkdir -p /output && \
+    # 如果存在 system 目录，直接复制
+    if [ -d "system" ]; then \
+        echo "Copying system directory..." && \
+        cp -a system /output/; \
+    fi && \
+    # 如果存在顶层的 product 或 system_ext (非标准结构)，复制到 /output/system/ 下
+    # 以防万一，虽然 MindTheGapps 通常在 system/ 下
+    for dir in product system_ext; do \
+        if [ -d "$dir" ]; then \
+            echo "Copying $dir to system/$dir..." && \
+            mkdir -p /output/system && \
+            cp -a "$dir" /output/system/; \
+        fi; \
+    done && \
+    # 在 builder 阶段修复权限，避免在最终镜像中运行命令导致 QEMU 错误
+    chown -R 0:0 /output
+
+# 第二阶段：构建最终镜像
+FROM redroid/redroid:14.0.0_64only-latest
+
+# 从 builder 阶段复制准备好的 GApps 文件到根目录
+COPY --from=builder /output /
+
+# 这里的命令是为了确保文件被正确覆盖且权限正确
+# 如果有特定的 GApps 初始化脚本需要运行，可以在这里添加
