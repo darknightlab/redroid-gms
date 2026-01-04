@@ -46,17 +46,15 @@ RUN cd /tmp/gapps_extracted && \
             mkdir -p /output/system && \
             cp -a "$dir" /output/system/; \
         fi; \
-    done
+    done && \
+    # 在 builder 阶段修复权限，避免在最终镜像中运行命令导致 QEMU 错误
+    chown -R 0:0 /output
 
 # 第二阶段：构建最终镜像
 FROM redroid/redroid:14.0.0-latest
 
 # 从 builder 阶段复制准备好的 GApps 文件到根目录
 COPY --from=builder /output /
-
-# 修复权限
-# Android 系统文件通常需要 root 所有权
-RUN chown -R 0:0 /system /product /system_ext || true
 
 # 这里的命令是为了确保文件被正确覆盖且权限正确
 # 如果有特定的 GApps 初始化脚本需要运行，可以在这里添加
